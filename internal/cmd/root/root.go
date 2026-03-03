@@ -15,20 +15,17 @@ import (
 	"github.com/kong/kongctl/internal/cmd/root/verbs/adopt"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/api"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/apply"
+	"github.com/kong/kongctl/internal/cmd/root/verbs/collect"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/del"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/diff"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/dump"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/get"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/help"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/kai"
-	"github.com/kong/kongctl/internal/cmd/root/verbs/lint"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/list"
-	"github.com/kong/kongctl/internal/cmd/root/verbs/listen"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/login"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/logout"
-	"github.com/kong/kongctl/internal/cmd/root/verbs/patch"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/plan"
-	"github.com/kong/kongctl/internal/cmd/root/verbs/ps"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/sync"
 	"github.com/kong/kongctl/internal/cmd/root/verbs/view"
 	"github.com/kong/kongctl/internal/cmd/root/version"
@@ -42,7 +39,6 @@ import (
 	"github.com/kong/kongctl/internal/util/i18n"
 	"github.com/kong/kongctl/internal/util/normalizers"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 )
 
 var (
@@ -90,46 +86,6 @@ var (
 	logFile     *os.File
 )
 
-const mergedFlagsUsageTemplate = `Usage:{{if .Runnable}}
-  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
-  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
-
-Aliases:
-  {{.NameAndAliases}}{{end}}{{if .HasExample}}
-
-Examples:
-{{.Example}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
-
-Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
-
-{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
-
-Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}
-{{if or .HasAvailableLocalFlags .HasAvailableInheritedFlags}}
-
-Flags:
-{{mergedFlagUsages . | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
-
-Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
-
-Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
-`
-
-const logFilePIDToken = "%PID%"
-
-func mergedFlagUsages(cmd *cobra.Command) string {
-	flags := pflag.NewFlagSet(cmd.DisplayName(), pflag.ContinueOnError)
-	flags.SortFlags = true
-	flags.AddFlagSet(cmd.LocalFlags())
-	flags.AddFlagSet(cmd.InheritedFlags())
-
-	return strings.TrimRight(flags.FlagUsages(), "\n")
-}
-
 func newRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   meta.CLIName,
@@ -151,8 +107,6 @@ func newRootCmd() *cobra.Command {
 		Use:    "no-help",
 		Hidden: true,
 	})
-	cobra.AddTemplateFunc("mergedFlagUsages", mergedFlagUsages)
-	rootCmd.SetUsageTemplate(mergedFlagsUsageTemplate)
 
 	// parses all flags not just the target command
 	rootCmd.TraverseChildren = true
@@ -221,18 +175,6 @@ func addCommands() error {
 	}
 	rootCmd.AddCommand(command)
 
-	command, err = listen.NewListenCmd()
-	if err != nil {
-		return err
-	}
-	rootCmd.AddCommand(command)
-
-	command, err = listen.NewTailCmd()
-	if err != nil {
-		return err
-	}
-	rootCmd.AddCommand(command)
-
 	command, err = view.NewViewCmd()
 	if err != nil {
 		return err
@@ -251,19 +193,7 @@ func addCommands() error {
 	}
 	rootCmd.AddCommand(command)
 
-	command, err = ps.NewPSCmd()
-	if err != nil {
-		return err
-	}
-	rootCmd.AddCommand(command)
-
 	command, err = login.NewLoginCmd()
-	if err != nil {
-		return err
-	}
-	rootCmd.AddCommand(command)
-
-	command, err = lint.NewLintCmd()
 	if err != nil {
 		return err
 	}
@@ -276,12 +206,6 @@ func addCommands() error {
 	rootCmd.AddCommand(command)
 
 	command, err = dump.NewDumpCmd()
-	if err != nil {
-		return err
-	}
-	rootCmd.AddCommand(command)
-
-	command, err = patch.NewPatchCmd()
 	if err != nil {
 		return err
 	}
@@ -305,6 +229,11 @@ func addCommands() error {
 	}
 	rootCmd.AddCommand(command)
 
+	command, err = collect.NewCollectCmd()
+	if err != nil {
+		return err
+	}
+	rootCmd.AddCommand(command)
 	//command, err = export.NewExportCmd()
 	//if err != nil {
 	//	return err
@@ -371,66 +300,6 @@ func init() {
 	if found {
 		currProfile = profileEnvVar
 	}
-
-	// Remove Event Gateway commands from root when not explicitly enabled.
-	// Visibility controlled by KONGCTL_ENABLE_EVENT_GATEWAY environment variable.
-	removeEventGatewayCommands()
-}
-
-// removeEventGatewayCommands removes event gateway related subcommands from
-// get, adopt, and dump commands at root level and under konnect.
-func removeEventGatewayCommands() {
-	targetVerbs := map[string]bool{
-		"get":   true,
-		"adopt": true,
-		"dump":  true,
-	}
-
-	// Check if event gateway resources should be hidden
-	if util.IsEventGatewayEnabled() {
-		// If preview is enabled, keep event gateway commands
-		return
-	}
-
-	// Remove from root level commands and nested under konnect
-	// Pattern: get/adopt/dump -> konnect -> event-gateway-*
-	for _, cmd := range rootCmd.Commands() {
-		if targetVerbs[cmd.Name()] {
-			removeEventGatewaySubcommands(cmd)
-
-			// Also check for konnect subcommand under get/adopt/dump
-			// Pattern: get konnect -> event-gateway-*
-			for _, subCmd := range cmd.Commands() {
-				if subCmd.Name() == "konnect" {
-					removeEventGatewaySubcommands(subCmd)
-				}
-			}
-		}
-	}
-}
-
-// removeEventGatewaySubcommands removes event gateway related subcommands from a command.
-func removeEventGatewaySubcommands(cmd *cobra.Command) {
-	var filteredCommands []*cobra.Command
-
-	for _, subCmd := range cmd.Commands() {
-		cmdName := subCmd.Name()
-		// Check if this is an event gateway related command
-		if strings.Contains(cmdName, "event-gateway") ||
-			strings.Contains(cmdName, "event_gateway") {
-			// Skip this command (don't add to filtered list)
-			continue
-		}
-		filteredCommands = append(filteredCommands, subCmd)
-	}
-
-	// Replace the command's subcommands with the filtered list
-	if len(filteredCommands) < len(cmd.Commands()) {
-		cmd.RemoveCommand(cmd.Commands()...)
-		for _, filteredCmd := range filteredCommands {
-			cmd.AddCommand(filteredCmd)
-		}
-	}
 }
 
 func bindFlags(config config.Hook) {
@@ -471,11 +340,7 @@ func initConfig() {
 		}
 		_ = theme.SetCurrent(common.DefaultColorTheme)
 		currConfig.SetString(common.ColorThemeConfigPath, common.DefaultColorTheme)
-		themeName = common.DefaultColorTheme
 	}
-	// Show the hint whenever the active theme is the built-in default.
-	// Users who have chosen any other theme have already discovered the feature.
-	theme.SetConfiguredExplicitly(themeName != common.DefaultColorTheme)
 
 	loggerOpts := &slog.HandlerOptions{
 		Level: log.ConfigLevelStringToSlogLevel(config.GetString(common.LogLevelConfigPath)),
@@ -492,10 +357,6 @@ func initConfig() {
 		configDir := filepath.Dir(configPath)
 		defaultLogPath := filepath.Join(configDir, "logs", meta.CLIName+".log")
 		logPath = defaultLogPath
-		config.SetString(common.LogFileConfigPath, logPath)
-	}
-	if strings.Contains(logPath, logFilePIDToken) {
-		logPath = strings.ReplaceAll(logPath, logFilePIDToken, fmt.Sprintf("%d", os.Getpid()))
 		config.SetString(common.LogFileConfigPath, logPath)
 	}
 
@@ -522,11 +383,6 @@ func initConfig() {
 func Execute(ctx context.Context, s *iostreams.IOStreams, bi *build.Info) {
 	var err error
 	buildInfo = bi
-	version := meta.DefaultCLIVersion
-	if bi != nil {
-		version = bi.Version
-	}
-	meta.SetCLIVersion(version)
 	cobra.EnableTraverseRunHooks = true
 	streams = s
 	defaultConfigFilePath, err = config.GetDefaultConfigFilePath()
